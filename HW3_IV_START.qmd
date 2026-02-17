@@ -25,7 +25,7 @@ Keep your work readable: Use clear headings and label plot elements thoughtfully
 
 Submit both your rendered output and the Quarto (`.qmd`) file.
 
-**Assignment submission (YOUR NAME)**: ______________________________________
+**Assignment submission (YOUR NAME)**: Marie tolteca
 
 
 ------------------------------------------------------------------------
@@ -65,8 +65,11 @@ library(AER)      # for ivreg (2SLS estimation)
 
 ```{r}
 
-matched_data <- 
+matched_data <- read_csv(here('data','matched_data_subset.csv')) %>% 
+    mutate(precinct_id = factor(precinct_id))
 
+#Checking if the column is now a factor
+class(matched_data$precinct_id)
 ```
 
 ------------------------------------------------------------------------
@@ -77,7 +80,14 @@ Intuition for Using an Instrument:
 
 **Question 1:** After matching on observables, why might we still need to utilize an instrumental variable approach to identify the causal effect of turbine proposals on vote share? In other words, what potential issues remain that an IV method can help address in this context? Use specific examples from the study to illustrate threats to a causal interpretation, then explain how an IV approach is designed to mitigate those threats.
 
-*Response:* _________________________
+*Response:* 
+After matching on observables, we still need to utilize an instrumental variable approach because unobservable characteristics could still bias the causal estimate of turbine proposals on vote share.
+Even though matching balances precincts on observable covariates like home values, education, income, and population density, there remain potential unobservable confounders that could threaten causal interpretation.
+- Communities with stronger environmental activism might both attract turbines (developers expect receptiveness) AND vote differently due to political orientation
+- Areas with weaker governance might be targeted for development (easier land agreements) AND have different baseline voting patterns
+- Landowners hosting turbines might differ in unobservable ways (financial need, ideology) that correlate with community voting behavior
+Wind speed (cubed) is orthogonal to political preferences (precinct boundaries) it's determined by geography/meteorology, not community characteristics. Developers chase wind resources for profit maximization under the feed in tariff, creating predicted placement variation in turbines.
+The IV approach relies on the exclusion restriction: wind speed affects vote share only through turbine placement. This exploits exogenous variation in treatment assignment, isolating the causal effect while eliminating bias from unobservables that matching cannot address.
 
 ------------------------------------------------------------------------
 
@@ -92,25 +102,33 @@ b. Include the control variables used in Stokes (2015) for both stages: Distance
 c. After running the first stage, report the F-statistic for the instrument.
 
 ```{r}
-first_stage <- lm()
+first_stage <- lm(proposed_turbine_3km ~ log_wind_power + mindistlake + long_lat + lat_sq + long_sq + district_id,
+                  data = matched_data)
 
 export_summs(first_stage, digits = 3,
              model.names = c("First stage: Prpoposed Turbine 3km"),
              coefs = c("(Intercept)", "log_wind_power")) 
+
+# Extract the F-statistic for instrument strength
+first_stage_summary <- summary(first_stage)
+fstat <- (first_stage_summary$fstatistic[1])
+
+print(paste("The F-Statistic:", round(first_stage_summary$fstatistic[1], 2)))
 
 ```
 
 ###  Testing Instrument Relevance
 
 Check instrument strength (F-statistic)
+**Assessing instrument strength**: A common rule of thumb is that the **F-statistic** on the excluded instrument(s) in the first stage should be greater than 10. An F-stat below 10 suggests a **weak instrument**, which can lead to biased IV estimates and unreliable inference.
+- The F-Statistic in the first stage is greater than 10, it is at {fstat} indicating a strong instrument.
 ```{r}
-
-
+print(paste("The F-Statistic:", round(first_stage_summary$fstatistic[1], 2)))
 ```
 
 **Question 2A:** Based on the instrument relevance test reported in the study, would you conclude the instrument is strong enough to be credible? Explain what a weak instrument would mean in this setting: Specifically, what would it suggest about compliance with Ontario’s Green Energy Act policy? 
 
-*Response:* _________________________ 
+*Response:* Based on the instrument relevance test reported in the study, an F-statistic of {fstat} indicates a strong instrument at the first stage, confirming that wind power strongly predicts turbine placement in the first stage. If the f-statistic was less than 10 it would indicate a weak instrument which could lead to a biased IV estimates and unreliable inference. A weak instrument in this setting would suggest that wind resources did not primarily determine turbine placement, undermining the study's identification strategy. This would mean, developers were not simply chasing wind resources for profit maximization under the Green Energy Act, but instead may have selected sites based on political factors, local resistance levels, or community characteristics. The endogenous factors the IV approach is designed to eliminate. This would violate the assumption that wind speed provides as-if random variation in treatment assignment.
 
 ------------------------------------------------------------------------
 
@@ -128,9 +146,11 @@ e. Fill in the code for these steps below to obtain the second-stage regression 
 
 Save predicted values $\hat{X}_i$ from first stage 
 ```{r}
+matched_data$proposed_turbine_3km_HAT <- predict(first_stage)
 
-matched_data$proposed_turbine_3km_HAT <- 
-
+second_stage <- lm(change_liberal ~ proposed_turbine_3km_HAT + mindistlake + 
+                   long_lat + lat_sq + long_sq + district_id,
+                   data = matched_data)
 ```
 
 #### Estimate the second-stage regression 
@@ -138,7 +158,9 @@ matched_data$proposed_turbine_3km_HAT <-
 $$LiberalVoteShare_i = \beta_0 + \beta_1 \widehat{ProposedTurbine}_i + ControlVariables... +  \epsilon_i$$
 
 ```{r}
-second_stage <- lm()
+second_stage <- lm(change_liberal ~ proposed_turbine_3km_HAT + mindistlake + 
+                   long_lat + lat_sq + long_sq + district_id,
+                   data = matched_data)
 
 export_summs(second_stage, digits = 3, 
              model.names = c("Second stage: Change in Liberal Vote Share"),
@@ -148,10 +170,12 @@ export_summs(second_stage, digits = 3,
 #### Interpreting the 2SLS Estimate
 
 **Question 2B:** Imagine you are explaining your 2SLS findings to a policymaker in Ontario. What does the estimated coefficient on `proposed_turbine_3km_HAT` imply about the electoral impact of a local wind turbine proposal (within 3 km) on liberal vote share?
+- In communities where a wind turbine proposal occurs within 3 km, Liberal candidates receive about 8 percentage points fewer votes than they otherwise would have, due to the presence of the proposal.
 
 **Question 2C:** Explain what it means that IV identifies a LATE in the context of the wind-turbine voting study. What specific subset of observations does the second-stage 2SLS estimate apply to, and what does it imply about interpretation and generalizability? 
-
-*Response:* _________________________ 
+Local average treatment effect (LATE)
+*Response:* 
+-The IV estimate identifies a LATE for precincts whose exposure to turbine proposals is influenced by wind power (compliers). The result does not represent the average effect for all precincts, but only for those whose treatment status responds to wind resource quality, which limits generalizability.
 
 ------------------------------------------------------------------------
 
@@ -161,7 +185,15 @@ export_summs(second_stage, digits = 3,
 
 **Question 3:** List the four key assumptions required for the IV strategy (2SLS) to identify a causal effect, and briefly explain what each one means in the context of this study. (Hint: think about what conditions a valid instrument must satisfy (relevance, exclusion,...)
 
-*Response:* _________________________ 
+*Response:* 
+1. Relevance: The instrument (wind speed) must strongly predict the treatment (wind turbine placement)
+- Wind power strongly predicts where turbines are proposed (F = 56.94 > 10), confirming developers chase wind resources for profit under the Green Energy Act.
+2. Exclusion Restriction: The instrument (wind speed) should not directly relate to the outcome (vote shoare for the incumbent government). The instrument should only relate to the outcome through treatment.
+- Wind speed only affects voting behavior through turbine placement, not through other channels.
+3. Exogeneity: The instrument is unrelated to unobserved factors, meaning it is independent of potential outcomes and unobserved confounders.
+= Wind speed is determined by geography/meteorology, not by political preferences or community characteristics that influence voting.
+4. Monotonicity: The instrument affects the treatment in one direction only.
+= Higher wind speed never decreases the probability of turbine placement (developers wouldn't avoid high-wind areas under this profit maximizing policy).
 
 ------------------------------------------------------------------------
 
@@ -182,12 +214,15 @@ Syntax for specifying 2SLS using `ivreg()`:
 
 
 ```{r}
-  
-fit_2sls <- ivreg()
+fit_2sls <- ivreg(change_liberal ~ proposed_turbine_3km + mindistlake + 
+                  long_lat + lat_sq + long_sq + district_id | 
+                  log_wind_power + mindistlake + long_lat + lat_sq + 
+                  long_sq + district_id,
+                  data = matched_data)
 
 export_summs(fit_2sls, digits = 3,
              model.names = c("Change in Liberal Vote Share"),
-             #coefs = c("(Intercept)", "proposed_turbine_3km")
+             coefs = c("(Intercept)", "proposed_turbine_3km")
              ) 
 ```
 
